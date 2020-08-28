@@ -53,10 +53,12 @@ int main(int argc, char **argv)
 {
     // Edge-SLAM: check arguments
     // Check run type and convert to lowercase
+    // 将client和server转化为小写并初始化
     std::string RunType(argv[3]);
     std::transform(RunType.begin(), RunType.end(), RunType.begin(), ::tolower);
     ros::init(argc, argv, RunType);
     ros::start();
+    // 除开Edge_SLAM, 输入错误
     if((argc != 4) || ((RunType.compare("client") != 0) && (RunType.compare("server") != 0)))
     {
         cerr << endl << "Usage: rosrun Edge_SLAM RGBD VOC_PATH SETTINGS_PATH RUN_TYPE(client|server)" << endl;
@@ -66,9 +68,11 @@ int main(int argc, char **argv)
 
     // Edge-SLAM
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
+    // 调用System对象,参数多了一个RunType,表示client或者server，对应着下面的分情况,看system.cc
     ORB_SLAM2::System SLAM(argv[1],argv[2],RunType,ORB_SLAM2::System::RGBD,true);
 
     // Edge-SLAM: check client or server
+    // 分情况
     if (RunType.compare("client") == 0)
     {
         ImageGrabber igb(&SLAM);
@@ -86,6 +90,7 @@ int main(int argc, char **argv)
 
         // Edge-SLAM: split shutdown between client and server
         // Stop all threads
+        // 退出
         SLAM.ClientShutdown();
     }
     else
