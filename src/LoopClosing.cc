@@ -63,16 +63,20 @@ void LoopClosing::Run()
     while(1)
     {
         // Check if there are keyframes in the queue
+        // 检查是否有关键帧
         if(CheckNewKeyFrames())
         {
             // Detect loop candidates and check covisibility consistency
+            // 检测loop的候选帧，检查共视图
             if(DetectLoop())
             {
                // Compute similarity transformation [sR|t]
                // In the stereo/RGBD case s=1
+               // 计算相似变换
                if(ComputeSim3())
                {
                    // Perform loop fusion and pose graph optimization
+                   // loop 融合，位姿优化
                    CorrectLoop();
                }
             }
@@ -104,6 +108,7 @@ bool LoopClosing::CheckNewKeyFrames()
 
 bool LoopClosing::DetectLoop()
 {
+    // 在关键帧队列中提取队首元素作为当前关键帧
     {
         unique_lock<mutex> lock(mMutexLoopQueue);
         mpCurrentKF = mlpLoopKeyFrameQueue.front();
@@ -123,6 +128,7 @@ bool LoopClosing::DetectLoop()
     // Compute reference BoW similarity score
     // This is the lowest score to a connected keyframe in the covisibility graph
     // We will impose loop candidates to have a higher similarity than this
+    // 获取当前关键帧的共视关键帧，并计算当前关键帧与每个共视关键帧之间的BOW向量得分，记录最小得分minScore
     const vector<KeyFrame*> vpConnectedKeyFrames = mpCurrentKF->GetVectorCovisibleKeyFrames();
     const DBoW2::BowVector &CurrentBowVec = mpCurrentKF->mBowVec;
     float minScore = 1;
@@ -140,6 +146,7 @@ bool LoopClosing::DetectLoop()
     }
 
     // Query the database imposing the minimum score
+    // 根据最小得分minScore在关键帧数据库mpKeyFrameDB中查找当前关键帧的回环候选关键帧vpCandidateKFs
     vector<KeyFrame*> vpCandidateKFs = mpKeyFrameDB->DetectLoopCandidates(mpCurrentKF, minScore);
 
     // If there are no loop candidates, just add new keyframe and return false
@@ -155,6 +162,8 @@ bool LoopClosing::DetectLoop()
     // Each candidate expands a covisibility group (keyframes connected to the loop candidate in the covisibility graph)
     // A group is consistent with a previous group if they share at least a keyframe
     // We must detect a consistent loop in several consecutive keyframes to accept it
+    // 对每个候选关键帧进行一致性检测
+    // 经过一致性检测后，如果存在充分连接的候选关键帧，则证明检测到了回环；否则，回环检测失败
     mvpEnoughConsistentCandidates.clear();
 
     vector<ConsistentGroup> vCurrentConsistentGroups;
@@ -229,7 +238,7 @@ bool LoopClosing::DetectLoop()
     mpCurrentKF->SetErase();
     return false;
 }
-
+// 计算Sim3
 bool LoopClosing::ComputeSim3()
 {
     // For each consistent loop candidate we try to compute a Sim3
@@ -400,16 +409,17 @@ bool LoopClosing::ComputeSim3()
     }
 
 }
-
+// 闭环矫正
 void LoopClosing::CorrectLoop()
 {
     cout << "Loop detected!" << endl;
 
-    // Send a stop signal to Local Mapping
+    // Send a stop signal to Local MappingEdge
     // Avoid new keyframes are inserted while correcting the loop
     mpLocalMapper->RequestStop();
 
     // If a Global Bundle Adjustment is running, abort it
+    // 如果有全局优化running，抛弃
     if(isRunningGBA())
     {
         unique_lock<mutex> lock(mMutexGBA);
@@ -433,6 +443,7 @@ void LoopClosing::CorrectLoop()
     }
 
     // Ensure current keyframe is updated
+    // 确保当前的关键帧被更新
     mpCurrentKF->UpdateConnections();
 
     // Retrive keyframes connected to the current keyframe and compute corrected Sim3 pose by propagation
@@ -462,6 +473,7 @@ void LoopClosing::CorrectLoop()
                 g2o::Sim3 g2oSic(Converter::toMatrix3d(Ric),Converter::toVector3d(tic),1.0);
                 g2o::Sim3 g2oCorrectedSiw = g2oSic*mg2oScw;
                 //Pose corrected with the Sim3 of the loop closure
+                // 位姿矫正
                 CorrectedSim3[pKFi]=g2oCorrectedSiw;
             }
 
@@ -473,6 +485,7 @@ void LoopClosing::CorrectLoop()
         }
 
         // Correct all MapPoints obsrved by current keyframe and neighbors, so that they align with the other side of the loop
+        // 矫正所有地图点
         for(KeyFrameAndPose::iterator mit=CorrectedSim3.begin(), mend=CorrectedSim3.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
@@ -521,6 +534,7 @@ void LoopClosing::CorrectLoop()
 
         // Start Loop Fusion
         // Update matched map points and replace if duplicated
+        // 闭环融合
         for(size_t i=0; i<mvpCurrentMatchedPoints.size(); i++)
         {
             if(mvpCurrentMatchedPoints[i])
@@ -566,11 +580,13 @@ void LoopClosing::CorrectLoop()
     }
 
     // Optimize graph
+    // 优化
     Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, mpCurrentKF, NonCorrectedSim3, CorrectedSim3, LoopConnections, mbFixScale);
 
     mpMap->InformNewBigChange();
 
     // Add loop edge
+    // 添加闭环边
     mpMatchedKF->AddLoopEdge(mpCurrentKF);
     mpCurrentKF->AddLoopEdge(mpMatchedKF);
 

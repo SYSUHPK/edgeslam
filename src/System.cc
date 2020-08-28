@@ -51,6 +51,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, std::str
         cout << "RGB-D" << endl;
 
     //Check settings file
+    // 检查相机内参文件
     cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
@@ -60,6 +61,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, std::str
 
 
     //Load ORB Vocabulary
+    // 加载ORB词典
     cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
     mpVocabulary = new ORBVocabulary();
@@ -73,34 +75,43 @@ System::System(const string &strVocFile, const string &strSettingsFile, std::str
     cout << "Vocabulary loaded!" << endl << endl;
 
     //Create KeyFrame Database
+    // 创建KF数据库，这里实际上是引用传递
     mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
     //Create the Map
+    // 创建地图对象
     mpMap = new Map();
 
     // Edge-SLAM: client/server
+    // 分情况：Tracking -> client; LocalMapping,LoopClosing -> server  
+    // 只在客户端显示
     if (RunType.compare("client") == 0){
         //Create Drawers. These are used by the Viewer
+        // 创建显示窗口，显示frame和map
         mpFrameDrawer = new FrameDrawer(mpMap);
         mpMapDrawer = new MapDrawer(mpMap, strSettingsFile);
 
         //Initialize the Tracking thread
         //(it will live in the main thread of execution, the one that called this constructor)
+        // Tracking线程，作为主线程
         mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
                                 mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
     } else if (RunType.compare("server") == 0){
         // Edge-SLAM: added settings file
         //Initialize the Local Mapping thread and launch
+        // Localmapping::Run调用
         mpLocalMapper = new LocalMapping(mpMap, mpKeyFrameDatabase, mpVocabulary, strSettingsFile, mSensor==MONOCULAR);
         mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run,mpLocalMapper);
 
         //Initialize the Loop Closing thread and launch
+        // LoopClosing
         mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
         mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
     }
-
+    // 由于只在client端显示，所以进行判断
     if (RunType.compare("client") == 0){
         //Initialize the Viewer thread and launch
+        //传入参数：this,图片显示，地图显示，跟踪对象，相机内参, viewer线程
         if(bUseViewer)
         {
             mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile);
@@ -113,7 +124,8 @@ System::System(const string &strVocFile, const string &strSettingsFile, std::str
     //Set pointers between threads
     //mpTracker->SetLocalMapper(mpLocalMapper);
     //mpTracker->SetLoopClosing(mpLoopCloser);
-
+    // 在server端
+    // 跟踪、局部地图、全局地图之间的互相联系
     if (RunType.compare("server") == 0){
         // Edge-SLAM: partially disabled
         //mpLocalMapper->SetTracker(mpTracker);

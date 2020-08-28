@@ -27,11 +27,13 @@
 
 namespace ORB_SLAM2
 {
+// 修改的地方
 // Edge-SLAM: measure
 std::chrono::high_resolution_clock::time_point LocalMapping::msLastMUStart = std::chrono::high_resolution_clock::now();
 std::chrono::high_resolution_clock::time_point LocalMapping::msLastMUStop;
 
 // Edge-SLAM: map update variables
+// 地图更新的相关参数变量
 const int LocalMapping::MAP_FREQ=5000;
 const int LocalMapping::KF_NUM=6;
 const int LocalMapping::CONN_KF=2;
@@ -39,6 +41,7 @@ bool LocalMapping::msNewKFFlag=false;
 stack<long unsigned int> LocalMapping::msLatestKFsId;
 
 // Edge-SLAM: relocalization
+// 重定位参数
 vector<KeyFrame*> LocalMapping::vpCandidateKFs;
 unordered_set<long unsigned int> LocalMapping::usCandidateKFsId;
 bool LocalMapping::msRelocStatus=false;
@@ -53,6 +56,7 @@ LocalMapping::LocalMapping(Map *pMap, KeyFrameDatabase* pKFDB, ORBVocabulary* pV
     // Edge-SLAM: everything in this scope is new
 
     // Load camera parameters from settings file
+    // 加载相机参数
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     float fps = fSettings["Camera.fps"];
     if(fps==0)
@@ -62,23 +66,28 @@ LocalMapping::LocalMapping(Map *pMap, KeyFrameDatabase* pKFDB, ORBVocabulary* pV
     mMaxFrames = fps;
 
     // Setting up connections
+    // 建立连接
     string ip;
     string port_number;
     cout << "Enter the device IP address: ";
     getline(cin, ip);
     // Keyframe connection
+    // KF连接
     cout << "Enter the port number used for keyframe connection: ";
     getline(cin, port_number);
     keyframe_socket = new TcpSocket(ip, std::stoi(port_number));
+    // 等待连接
     keyframe_socket->waitForConnection();
     keyframe_thread = new thread(&ORB_SLAM2::LocalMapping::tcp_receive, &keyframe_queue, keyframe_socket, 2, "keyframe");
     // Frame connection
+    // 帧连接
     cout << "Enter the port number used for frame connection: ";
     getline(cin, port_number);
     frame_socket = new TcpSocket(ip, std::stoi(port_number));
     frame_socket->waitForConnection();
     frame_thread = new thread(&ORB_SLAM2::LocalMapping::tcp_receive, &frame_queue, frame_socket, 1, "frame");
     // Map connection
+    // 地图连接
     cout << "Enter the port number used for map connection: ";
     getline(cin, port_number);
     map_socket = new TcpSocket(ip, std::stoi(port_number));
@@ -93,6 +102,7 @@ LocalMapping::LocalMapping(Map *pMap, KeyFrameDatabase* pKFDB, ORBVocabulary* pV
 // Edge-SLAM
 void LocalMapping::keyframeCallback(const std::string& msg)
 {
+    // 不插入KF的条件
     // If Local Mapping is freezed by a Loop Closure do not insert keyframes
     if(isStopped() || stopRequested())
         return;
@@ -105,6 +115,7 @@ void LocalMapping::keyframeCallback(const std::string& msg)
     if(!SetNotStop(true))
         return;
 
+    // 接收关键帧
     KeyFrame *tKF = new KeyFrame();
     try
     {
@@ -120,6 +131,7 @@ void LocalMapping::keyframeCallback(const std::string& msg)
     }
 
     // Check for reset signal from client
+    // 检查client的重置信号
     if(tKF->GetResetKF() || (tKF->mnFrameId < mnLastKeyFrameId))
     {
         cout << "log,LocalMapping::keyframeCallback,received reset signal from client with keyframe " << tKF->mnId << endl;
@@ -135,6 +147,7 @@ void LocalMapping::keyframeCallback(const std::string& msg)
 
     // Check keyframe after receiving it from the client
     // If first received keyframe then insert without additional checking
+    // 检查并插入关键帧
     if ((tKF->mnId < 1) || (mpMap->KeyFramesInMap() < 1))
     {
         tKF->ChangeParent(NULL);
@@ -183,7 +196,9 @@ void LocalMapping::SetTracker(Tracking *pTracker)
 }
 */
 
+// 修改的地方
 // Edge-SLAM
+// 重置
 void LocalMapping::Reset()
 {
     /* Edge-SLAM: disabled because viewer is disabled on server
@@ -196,16 +211,19 @@ void LocalMapping::Reset()
     }*/
 
     // Reset Loop Closing
+    // 重置闭环检测
     cout << "Reseting Loop Closing...";
     mpLoopCloser->RequestReset();
     cout << " done" << endl;
 
     // Clear BoW Database
+    // 清空BoW数据库
     cout << "Reseting Database...";
     mpKeyFrameDB->clear();
     cout << " done" << endl;
 
     // Clear Map (this erase MapPoints and KeyFrames)
+    // 清空地图
     mpMap->clear();
 
     KeyFrame::nNextId = 0;
@@ -223,11 +241,13 @@ void LocalMapping::Run()
     while(1)
     {
         // Edge-SLAM: check if there is a new keyframe received, if not, then check if a frame is received for relocalization
+        // 检查是否有新的KF被接收，如果没有，是否有frame被接收用于重定位
         {
             string msg;
             if(keyframe_queue.try_dequeue(msg))
             {
                 // If relocalization was successful and a new keyframe is received, then drop any remaining relocalization frames in queue
+                // 如果重定位成功，并且新的KF被接收，丢弃任何queue中存在的重定位帧
                 if(msRelocStatus)
                 {
                     string data;
@@ -236,8 +256,10 @@ void LocalMapping::Run()
                         data.clear();
                     }
                 }
+                // 修改的地方，添加keyframeCallback函数
                 keyframeCallback(msg);
             }
+            // 有重定位的数据被接收，调用frameCallback函数
             else if(frame_queue.try_dequeue(msg))
             {
                 frameCallback(msg);
@@ -251,9 +273,11 @@ void LocalMapping::Run()
         if(CheckNewKeyFrames())
         {
             // BoW conversion and insertion in Map
+            // 处理新的关键帧（计算BOW向量并将关键帧插入地图）
             ProcessNewKeyFrame();
 
             // Edge-SLAM: check if new keyframe is received
+            // 检查是否有新的关键帧被接收
             {
                 string msg;
                 if(keyframe_queue.try_dequeue(msg))
@@ -261,14 +285,17 @@ void LocalMapping::Run()
             }
 
             // Check recent MapPoints
+            // 检查最近添加的地图点，剔除不符合要求的点
             MapPointCulling();
 
             // Triangulate new MapPoints
+            // 三角化新添加的地图点
             CreateNewMapPoints();
 
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
+                // 在邻近关键帧中寻找更多的匹配（新地图点－邻近关键帧）
                 SearchInNeighbors();
             }
 
@@ -281,6 +308,7 @@ void LocalMapping::Run()
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
 
                 // Check redundant local Keyframes
+                // 删除冗余关键帧
                 KeyFrameCulling();
             }
 
@@ -302,19 +330,22 @@ void LocalMapping::Run()
 
         // Edge-SLAM: create and send local-map update
         // Edge-SLAM: added curly brackets (block) to limit measurement variables scope
+        // 创建和发送local-map更新
         {
             // Edge-SLAM: measure
             // Edge-SLAM: check how long it has been since last map update
             msLastMUStop = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(msLastMUStop - msLastMUStart);
             auto dCount = duration.count();
-
+            // 分两种条件
             // Send relocalization map
+            // 发送从定位地图
             if ((dCount > RELOC_FREQ) && (mpMap->KeyFramesInMap() > 0) && (msRelocStatus) && (msRelocNewFFlag) && (!CheckReset()))
             {
                 sendRelocMapUpdate();
             }
             // Send regular local map update
+            // 发送局部地图更新
             else if ((dCount > MAP_FREQ) && (mpMap->KeyFramesInMap() > 0) && (msNewKFFlag) && (!CheckReset()))
             {
                 sendLocalMapUpdate();
@@ -354,6 +385,7 @@ bool LocalMapping::CheckNewKeyFrames()
 
 void LocalMapping::ProcessNewKeyFrame()
 {
+    //锁住程序块，保证在取关键帧的过程中mlNerKeyFrames不进行操作
     {
         unique_lock<mutex> lock(mMutexNewKFs);
         mpCurrentKeyFrame = mlNewKeyFrames.front();
@@ -361,9 +393,11 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Compute Bags of Words structures
+    // 计算关键帧的BOW描述子
     mpCurrentKeyFrame->ComputeBoW();
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
+    // 地图点与关键帧关联
     const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
 
     for(size_t i=0; i<vpMapPointMatches.size(); i++)
@@ -376,6 +410,7 @@ void LocalMapping::ProcessNewKeyFrame()
                 // Edge-SLAM: since we are not sending mObservations and pRefKF due to being pointers, we should take care of their adjustment
 
                 // Edge-SLAM: set mappoint refKF
+                // 设置地图点refKF，参考关键帧
                 if ((unsigned)pMP->mnFirstKFid != mpCurrentKeyFrame->mnId)
                 {
                     KeyFrame* pRefKF = mpMap->RetrieveKeyFrame(pMP->mnFirstKFid);
@@ -436,9 +471,11 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Update links in the Covisibility Graph
+    // 更新covisibility graph中的连接关系
     mpCurrentKeyFrame->UpdateConnections();
 
     // Insert Keyframe in Map
+    // 插入关键帧
     mpMap->AddKeyFrame(mpCurrentKeyFrame);
 }
 
@@ -1181,6 +1218,7 @@ void LocalMapping::frameCallback(const std::string& msg)
 
     // Relocalization is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
+    // 查询KF数据库
     vector<KeyFrame*> caKFs = mpKeyFrameDB->DetectRelocalizationCandidates(F);
 
     for(vector<KeyFrame*>::iterator it = caKFs.begin(); it != caKFs.end(); it++)
@@ -1205,6 +1243,7 @@ void LocalMapping::frameCallback(const std::string& msg)
 }
 
 // Edge-SLAM
+// 发送局部地图更新
 void LocalMapping::sendLocalMapUpdate()
 {
     cout << "log,LocalMapping::sendLocalMapUpdate,publish local map update" << endl;
@@ -1212,6 +1251,7 @@ void LocalMapping::sendLocalMapUpdate()
     std::vector<std::string> KFsData;
 
     // If map size is less than localMapSize, send the whole map, else send the lastest of size localMapSize
+    // 如果地图的尺寸比localMapSize(6)小，那么全部更新，否则只更新最新的部分
     long unsigned localMapSize = KF_NUM;
     if(mpMap->KeyFramesInMap() <= localMapSize)
     {
@@ -1294,9 +1334,11 @@ void LocalMapping::sendLocalMapUpdate()
     }
 
     // Clear
+    // 清空保存的发送的KF数据
     KFsData.clear();
 
     // Clear relocalization vectors
+    // 清空保存的发送的重定位数据
     usCandidateKFsId.clear();
     vpCandidateKFs.clear();
 
@@ -1305,8 +1347,10 @@ void LocalMapping::sendLocalMapUpdate()
 }
 
 // Edge-SLAM: relocalization
+// 发送重定位地图更新
 void LocalMapping::sendRelocMapUpdate()
 {
+    // 如果候选KF不为空，这里的候选KF其实就是专门用来进行重定位或者闭环检测的
     if(!vpCandidateKFs.empty())
     {
         // Relocalization map
@@ -1317,7 +1361,7 @@ void LocalMapping::sendRelocMapUpdate()
         std::vector<std::string> KFsData;
 
         cout << "log,LocalMapping::sendRelocMapUpdate,keyframes in relocalization map: ";
-
+        // 遍历候选KF，存储在KFsData
         for(vector<KeyFrame*>::iterator vpcit = vpCandidateKFs.begin(); vpcit != vpCandidateKFs.end(); vpcit++)
         {
             KeyFrame* vpcKF = *vpcit;
@@ -1370,6 +1414,7 @@ void LocalMapping::sendRelocMapUpdate()
         cout << "log,LocalMapping::sendRelocMapUpdate,attach latest local-map to relocalization map" << endl;
 
         // If map size is less than localMapSize, send the whole map, else send the lastest of size localMapSize
+        // 同上
         long unsigned localMapSize = KF_NUM;
         if(mpMap->KeyFramesInMap() <= localMapSize)
         {

@@ -44,10 +44,13 @@ namespace ORB_SLAM2
 {
 // Edge-SLAM: map updates
 // Edge-SLAM: vector to hold local-map update
+// mapVec存储local-map更新
 vector<std::string> Tracking::mapVec;
 // Edge-SLAM: debug counters
+// debug计数
 int Tracking::mapCallbackCount=0;
 // Edge-SLAM: map update checkers
+// map更新的阈值
 const unsigned int Tracking::TIME_KF=300;
 unsigned int Tracking::mnMapUpdateLastKFId=0;
 bool Tracking::mapUpToDate=false;
@@ -55,12 +58,14 @@ const unsigned int Tracking::LOCAL_MAP_SIZE=6;
 bool Tracking::refKFSet=false;
 
 // Edge-SLAM: measure
+// 声明变量
 std::chrono::high_resolution_clock::time_point Tracking::msRelocLastMapUpdateStart = std::chrono::high_resolution_clock::now();
 std::chrono::high_resolution_clock::time_point Tracking::msRelocLastMapUpdateStop;
 std::chrono::high_resolution_clock::time_point Tracking::msLastKeyFrameStart = std::chrono::high_resolution_clock::now();
 std::chrono::high_resolution_clock::time_point Tracking::msLastKeyFrameStop;
 
 // Edge-SLAM: relocalization
+// 重定位的阈值
 bool Tracking::msRelocStatus=false;
 const int Tracking::RELOC_FREQ=500;
 
@@ -70,7 +75,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
 {
     // Load camera parameters from settings file
-
+    // 加载相机的内参
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     float fx = fSettings["Camera.fx"];
     float fy = fSettings["Camera.fy"];
@@ -130,13 +135,14 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
         cout << "- color order: BGR (ignored if grayscale)" << endl;
 
     // Load ORB parameters
-
+    // 加载ORB参数
     int nFeatures = fSettings["ORBextractor.nFeatures"];
     float fScaleFactor = fSettings["ORBextractor.scaleFactor"];
     int nLevels = fSettings["ORBextractor.nLevels"];
     int fIniThFAST = fSettings["ORBextractor.iniThFAST"];
     int fMinThFAST = fSettings["ORBextractor.minThFAST"];
-
+    // ORB特征提取对象mpORBextractorLeft
+    // 相机为RGBD相机时只新建以下对象，相机为双目时建立了右图提取对象，单目时新建了双倍特征提取的对象 
     mpORBextractorLeft = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
     if(sensor==System::STEREO)
@@ -166,7 +172,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
         else
             mDepthMapFactor = 1.0f/mDepthMapFactor;
     }
-
+    // 修改的部分
     // Edge-SLAM: setting up connections
     string ip, server_ip;
     string port_number, server_port;
@@ -174,15 +180,22 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     getline(cin, ip);
     cout << "Enter the server IP address: ";
     getline(cin, server_ip);
+
     // Edge-SLAM: keyframe connection
+    // client发起
+    // 关键帧连接，新的线程
     cout << "Enter the port number used for keyframe connection: ";
     getline(cin, port_number);
     cout << "Enter the server port number used for keyframe connection: ";
     getline(cin, server_port);
+    // 新建，绑定client
     keyframe_socket = new TcpSocket(ip, std::stoi(port_number), server_ip, std::stoi(server_port));
     keyframe_socket->sendConnectionRequest();
+    // 创建发送信息的线程
+    // thread中tcp_send之后的参数作为tcp_send的参数
     keyframe_thread = new thread(&ORB_SLAM2::Tracking::tcp_send, &keyframe_queue, keyframe_socket, "keyframe");
     // Edge-SLAM: frame connection
+    // 帧连接，新的线程
     cout << "Enter the port number used for frame connection: ";
     getline(cin, port_number);
     cout << "Enter the server port number used for frame connection: ";
@@ -191,12 +204,14 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     frame_socket->sendConnectionRequest();
     frame_thread = new thread(&ORB_SLAM2::Tracking::tcp_send, &frame_queue, frame_socket, "frame");
     // Edge-SLAM: map connection
+    // 地图连接，新的线程
     cout << "Enter the port number used for map connection: ";
     getline(cin, port_number);
     cout << "Enter the server port number used for map connection: ";
     getline(cin, server_port);
     map_socket = new TcpSocket(ip, std::stoi(port_number), server_ip, std::stoi(server_port));
     map_socket->sendConnectionRequest();
+    // 创建接收信息的线程
     map_thread = new thread(&ORB_SLAM2::Tracking::tcp_receive, &map_queue, map_socket, 1, "map");
 
     // Edge-SLAM: debug
@@ -204,11 +219,12 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 }
 
 // Edge-SLAM
+// 添加的函数
 void Tracking::mapCallback(const std::string& msg)
 {
     // Get Map Mutex -> Map cannot be changed
     unique_lock<mutex> lock2(mpMap->mMutexCallBackUpdate);
-
+    // 根据参数判断是否需要更新
     if(!msRelocStatus)
     {
         if(mpMap->KeyFramesInMap() < LOCAL_MAP_SIZE)
@@ -231,6 +247,7 @@ void Tracking::mapCallback(const std::string& msg)
             auto dCount = duration.count();
 
             // As the map adds more than LOCAL_MAP_SIZE keyframes, decrease TIME_KF to accept the update sooner
+            // 修改参数
             unsigned int divRate = (unsigned)(TIME_KF/((mpMap->KeyFramesInMap()/LOCAL_MAP_SIZE)+1));
             if(divRate < 50)
                 divRate = 0;
@@ -244,6 +261,7 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // Receive local-map update from server
+    // 接收更新
     mapVec.clear();
     try
     {
@@ -259,6 +277,7 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // If not in relocalization mode, then discard relocalization map update
+    // 如果不是重定位模式，抛弃重定位地图更新
     if((!msRelocStatus) && (mpMap->KeyFramesInMap()>=LOCAL_MAP_SIZE) && (mnMapUpdateLastKFId>10) && (mapVec.size()!=LOCAL_MAP_SIZE))
     {
         cout << "log,Tracking::mapCallback,relocalization map received after successfully relocalizing. map rejected. keyframes in map " << mpMap->KeyFramesInMap() << ". last MU KF id " << mnMapUpdateLastKFId << ". map size " << mapVec.size() << endl;
@@ -269,10 +288,12 @@ void Tracking::mapCallback(const std::string& msg)
     cout << "log,Tracking::mapCallback,accept and process map update " << ++mapCallbackCount << endl;
 
     // Keep current reference keyframe Id, and reset refKFSet
+    // 保持当前的参考KF id，重置refKFSet
     long unsigned int refId = mpReferenceKF->mnId;
     refKFSet = false;
 
     // Before clearing the map, we should retrieve the ids of map points within last frame
+    // 清除map之前，检索最后一帧内的地图点ID
     vector<unsigned long int> lastFrame_points_ids;
     vector<bool> lastFrame_points_availability;
     vector<unsigned long int> mvpLocalMapPoints_ids;
@@ -296,14 +317,19 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // Reset tracking thread to update it using a new local-map
+    // 重置tracking线程，使用新的local-map更新
     MUReset();
 
     // Reconstruct keyframes loop
     // For every keyframe, check its mappoints, then add them to tracking local-map
     // Add keyframe to tracking local-map
+    // 重建关键帧loop
+    // 对于每个关键帧，检查其地图点，然后将其添加到跟踪本地地图中
+    // 将关键帧添加到跟踪本地地图
     for(int i=0; i<(int)mapVec.size(); i++)
     {
         // Reconstruct keyframe
+        // 重建关键帧 对于每一帧
         KeyFrame *tKF = new KeyFrame();
         {
             try
@@ -330,6 +356,7 @@ void Tracking::mapCallback(const std::string& msg)
         tKF->ComputeBoW();
 
         // Get keyframe's mappoints
+        // 获取关键帧地图点
         vector<MapPoint*> vpMapPointMatches = tKF->GetMapPointMatches();
 
         // Iterate through current keyframe's mappoints and double check them
@@ -341,6 +368,7 @@ void Tracking::mapCallback(const std::string& msg)
                 if(!pMP->isBad())
                 {
                     // If tracking id is set
+                    // tracking id已经被设置
                     if(pMP->trSet)
                     {
                         MapPoint* pMPMap = mpMap->RetrieveMapPoint(pMP->mnId, true);
@@ -348,35 +376,44 @@ void Tracking::mapCallback(const std::string& msg)
                         if(pMPMap != NULL)
                         {
                             // Replace keyframe's mappoint pointer to the existing one in tracking local-map
+                            // 将关键帧的mappoint指针替换为跟踪本地地图中的现有指针
                             tKF->AddMapPoint(pMPMap, i);
 
                             // Add keyframe observation to the mappoint
+                            // 将关键帧观察值添加到地图点
                             pMPMap->AddObservation(tKF, i);
 
                             // Delete duplicate mappoint
+                            // 删除重复的地图点
                             delete pMP;
                         }
                         else
                         {
                             // Tracking id is already set, but whichThread is not set
+                            // 跟踪ID已设置，但尚未设置whichThread
                             pMP->AssignId(true);
 
                             // Add keyframe's mappoint to tracking local-map
+                            // 添加关键帧地图点到tracking 局部地图
                             mpMap->AddMapPoint(pMP);
 
                             // Add keyframe observation to the mappoint
+                            // 将关键帧观察值添加到地图点
                             pMP->AddObservation(tKF, i);
                             pMP->setMapPointer(mpMap); // We are not sending the map pointer in marshalling
                             pMP->SetReferenceKeyFrame(tKF);
                         }
                     }
+                    // tracking id已经被设置
                     else if(pMP->lmSet)     // If tracking id is not set, but local-mapping id is set
                     {
+                        // 标签为false
                         MapPoint* pMPMap = mpMap->RetrieveMapPoint(pMP->lmMnId, false);
 
                         if(pMPMap != NULL)
                         {
                             // Replace keyframe's mappoint pointer to the existing one in tracking local-map
+                            // 将关键帧的mappoint指针替换为跟踪本地地图中的现有指针
                             tKF->AddMapPoint(pMPMap, i);
 
                             // Add keyframe observation to the mappoint
@@ -404,12 +441,15 @@ void Tracking::mapCallback(const std::string& msg)
         }
 
         // Add keyframe to tracking local-map
+        // 添加KF到tracking local-map
         mpMap->AddKeyFrame(tKF);
 
         // Add Keyframe to database
+        // 添加KF到数据库
         mpKeyFrameDB->add(tKF);
 
         // Set RefKF to previous RefKF if it is part of the map update
+        // 如果它是地图更新的一部分，则将RefKF设置为以前的RefKF
         if(tKF->mnId == refId)
         {
             mpReferenceKF = tKF;
@@ -422,9 +462,11 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // Get all keyframes in tracking local-map
+    // 获取tracking local-map中所有的关键帧
     vector<KeyFrame*> vpKeyFrames = mpMap->GetAllKeyFrames();
 
     // Initialize Reference KeyFrame and other KF variables
+    // 初始化相关的KF和其它KF变量
     if(vpKeyFrames.size() > 0)
     {
         if(!refKFSet)
@@ -446,6 +488,7 @@ void Tracking::mapCallback(const std::string& msg)
     cout << "log,Tracking::mapCallback,keyframes in update: ";
 
     // Iterate through keyframes and reconstruct connections
+    // 遍历关键帧并重建连接
     for (std::vector<KeyFrame*>::iterator it=vpKeyFrames.begin(); it!=vpKeyFrames.end(); ++it)
     {
         KeyFrame* pKFCon = *it;
@@ -456,12 +499,14 @@ void Tracking::mapCallback(const std::string& msg)
         cout << pKFCon->mnId << " ";
 
         // If RefKF has lower id than current KF, then set it to that KF
+        // 如果RefKF的ID低于当前KF，则将其设置为该KF
         if(mpReferenceKF->mnId < pKFCon->mnId)
         {
             mpReferenceKF = pKFCon;
         }
 
         // Update other KF variables
+        // 更新其它KF变量
         if(mnMapUpdateLastKFId < pKFCon->mnId)
         {
             mnLastKeyFrameId = pKFCon->mnFrameId;
@@ -474,13 +519,16 @@ void Tracking::mapCallback(const std::string& msg)
     cout << endl;
 
     // Set last and current frame RefKF
+    // 设置上一帧和当前frame的RefKF
     mLastFrame.mpReferenceKF = mpReferenceKF;
     mCurrentFrame.mpReferenceKF = mpReferenceKF;
 
     // Get all map points in tracking local-map
+    // 获取tracking lcoal-map所有的地图点
     vector<MapPoint*> vpMapPoints = mpMap->GetAllMapPoints();
 
     // Iterate through all mappoints and SetReferenceKeyFrame
+    // 遍历所有地图点和SetReferenceKeyFrame
     for (std::vector<MapPoint*>::iterator it=vpMapPoints.begin(); it!=vpMapPoints.end(); ++it)
     {
         MapPoint* rMP = *it;
@@ -495,6 +543,7 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // Updating mLastFrame
+    // 更新mLastFrame
     for(int i =0; i<mLastFrame.N; i++)
     {
         if(lastFrame_points_availability[i])
@@ -513,6 +562,7 @@ void Tracking::mapCallback(const std::string& msg)
     }
 
     // We should update mvpLocalMapPoints for viewer
+    // 更新mvpLocalMapPoints给viewer
     for (unsigned int i = 0 ; i < mvpLocalMapPoints_ids.size(); i++)
     {
         MapPoint* pMP = mpMap->RetrieveMapPoint(mvpLocalMapPoints_ids[i], true);
@@ -593,12 +643,12 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
     return mCurrentFrame.mTcw.clone();
 }
 
-
+// 彩色图像和深度图像格式变换，新建当前帧mCurrentFrame ，进入跟踪程序Track(),返回当前帧位姿
 cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp)
 {
     mImGray = imRGB;
     cv::Mat imDepth = imD;
-
+    // 根据通道对彩色图进行调整
     if(mImGray.channels()==3)
     {
         if(mbRGB)
@@ -613,10 +663,10 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
         else
             cvtColor(mImGray,mImGray,CV_BGRA2GRAY);
     }
-
+    // 调整深度图
     if((fabs(mDepthMapFactor-1.0f)>1e-5) || imDepth.type()!=CV_32F)
         imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
-
+    // 对当前帧进行处理
     mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
     Track();
@@ -656,6 +706,7 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 
 void Tracking::Track()
 {
+    // 判断是否初始化，没有则进行初始化
     if(mState==NO_IMAGES_YET)
     {
         mState = NOT_INITIALIZED;
@@ -664,6 +715,7 @@ void Tracking::Track()
     mLastProcessedState=mState;
 
     // Edge-SLAM: check if there is a new map update received
+    // 检查是否有接收到新的地图更新，调用mapCallback
     {
         string msg;
         if(map_queue.try_dequeue(msg))
@@ -675,6 +727,7 @@ void Tracking::Track()
         // Edge-SLAM: we also use this lock when a map update is received from the server. Check mapCallback() function
         // Get Map Mutex -> Map cannot be changed
         unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+        // callback用到
         unique_lock<mutex> lock2(mpMap->mMutexCallBackUpdate);
 
         if(mState==NOT_INITIALIZED)
@@ -2160,6 +2213,7 @@ void Tracking::Reset()
 void Tracking::MUReset()
 {
     // Edge-SLAM
+    // 开始地图更新重置
     cout << "Starting map update reset..." << endl;
 
     cout << "System Reseting" << endl;
@@ -2184,11 +2238,13 @@ void Tracking::MUReset()
     */
 
     // Clear BoW Database
+    // 清除BoW数据库
     cout << "Reseting Database...";
     mpKeyFrameDB->clear();
     cout << " done" << endl;
 
     // Clear Map (this erase MapPoints and KeyFrames)
+    // 清除地图
     mpMap->clear();
 
     if(mpInitializer)
@@ -2198,6 +2254,7 @@ void Tracking::MUReset()
     }
 
     // Clear local MapPoints and KeyFrames
+    // 清除局部地图点和KF
     mvpLocalMapPoints.clear();
     mvpLocalKeyFrames.clear();
 
@@ -2244,6 +2301,7 @@ void Tracking::InformOnlyTracking(const bool &flag)
 }
 
 // Edge-SLAM: send function to be called on a separate thread
+// 接收的参数来自connect函数
 void Tracking::tcp_send(moodycamel::BlockingConcurrentQueue<std::string>* messageQueue, TcpSocket* socketObject, std::string name)
 {
     std::string msg;
